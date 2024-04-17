@@ -15,9 +15,13 @@ class VideoProcessingThread(threading.Thread):
         for video_path in self.video_paths:
             video_save_path = video_path.replace("post", "cascade_cut")
             video_save_path = video_save_path.replace(".mp4", "")
+
             os.makedirs(video_save_path, exist_ok=True)
-            print(f"cutting video {video_save_path}")
-            cascade_cut(video_path, video_save_path)
+
+            if len(os.listdir(video_save_path)) != 0:
+                print(f"{video_save_path} exists")
+            else:
+                cascade_cut(video_path, video_save_path)
 
 
 def detect_cut(video_path, video_save_path, threshold=27.0):
@@ -58,17 +62,10 @@ def cascade_cut(video_path, video_save_path):
     scene_manager.add_detector(ContentDetector(threshold=30))
 
     # Detector 2: Slow changes with a lower frame rate and threshold
-    scene_manager.add_detector(
-        ContentDetector(threshold=20, min_scene_len=30)
-    )
+    scene_manager.add_detector(ContentDetector(threshold=20, min_scene_len=30))
 
     # Detector 3: Slow changes with an even lower frame rate and threshold
-    scene_manager.add_detector(
-        ContentDetector(
-            threshold=15,
-            min_scene_len=30
-        )
-    )
+    scene_manager.add_detector(ContentDetector(threshold=15, min_scene_len=30))
 
     # Perform scene detection
     scene_manager.detect_scenes(video, show_progress=False)
@@ -82,11 +79,11 @@ def cascade_cut(video_path, video_save_path):
             output_file_template=video_save_path + "/" + "Scene-$SCENE_NUMBER.mp4",
             show_progress=False,
         )
-        print("scene detected")
+        print(f"{video_save_path}, cutting video")
     else:
         shutil.copy(video_path, video_save_path + "/" + "Scene-0.mp4")
-        print("no scene detected")
-    print(video_save_path, scene_list)
+        print(f"{video_save_path}, no scene detected")
+    # print(video_save_path, scene_list)
 
 
 def cutting_videos_in_directory(directory, num_threads=32):

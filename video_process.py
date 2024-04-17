@@ -31,15 +31,15 @@ from video_process.video_pose_extraction import mp_pose_detection_process
 from video_process.video_text_detection import mp_text_detect_process
 from video_process.video_av_consistency import mp_av_consistency_detect_process
 
-is_camera_rotating = False
+is_camera_rotating = True
 
-is_av_consistency = False
-is_text_detection = False
+is_av_consistency = True
+is_text_detection = True
 
-is_flow_computing = False
+is_flow_computing = True
 
 is_normlize_files = False
-is_cutting_videos = False
+is_cutting_videos = True
 
 
 def split_json(input_json_path, output_dir, batch_size=10000):
@@ -74,9 +74,9 @@ if __name__ == "__main__":
 
     thread_num = 4
     video_root = (
-        "/cpfs/user/xiongjunwen/workspace/Scraper/TikTokDownload/TED/TED_videos"
+        "/cpfs/user/xiongjunwen/workspace/Scraper/VideoProcess/Youtube_videos/batch_01"
     )
-    prefix_str = "TED_videos"
+    prefix_str = "batch_01"
 
     info_json_path = os.path.join(video_root, "selected_videos_by_camera_rotating.json")
 
