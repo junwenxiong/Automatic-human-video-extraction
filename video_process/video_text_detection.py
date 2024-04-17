@@ -9,16 +9,16 @@ from torch.autograd import Variable
 import cv2
 import torch.nn as nn
 import numpy as np
-from .CRAFT_pytorch import craft_utils
-from .CRAFT_pytorch import imgproc
+from .text_detection_model import craft_utils
+from .text_detection_model import imgproc
 import json
-from .CRAFT_pytorch.craft import CRAFT
+from .text_detection_model.craft import CRAFT
 from collections import OrderedDict
 import torch.multiprocessing as mp
 
 from .dwpose import DWposeDetector
-from .humanSeg.model.model import HumanMatting
-from .humanSeg.inference import single_inference
+from .human_segment_model.model.model import HumanMatting
+from .human_segment_model.inference import single_inference
 from PIL import Image
 from collections import OrderedDict
 from ultralytics import YOLO

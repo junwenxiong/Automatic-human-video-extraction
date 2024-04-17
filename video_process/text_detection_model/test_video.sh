@@ -1,0 +1,2 @@
+CUDA_VISIBLE_DEVICES=7 python test.py --trained_model=pretrained_weight/craft_mlt_25k.pth --test_folder=image_text
+# CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7 python video_text_det.py --trained_model=pretrained_weight/craft_mlt_25k.pth --test_folder=image_text

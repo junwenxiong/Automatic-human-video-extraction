@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=7 python demoTalkNet.py --videoFolder wild_videos --videoName presenter_talking2 --pretrainModel pretrained_weights/pretrain_TalkSet.model

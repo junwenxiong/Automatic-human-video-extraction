@@ -27,7 +27,6 @@ from video_process.video_motion import (
     compute_motion_amplitudes,
     mp_camera_rotating_detect_process,
 )
-from video_process.video_pose_extraction import mp_pose_detection_process
 from video_process.video_text_detection import mp_text_detect_process
 from video_process.video_av_consistency import mp_av_consistency_detect_process
 

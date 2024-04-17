@@ -14,8 +14,8 @@ from scenedetect.frame_timecode import FrameTimecode
 from scenedetect.stats_manager import StatsManager
 from scenedetect.detectors import ContentDetector
 
-from .TalkNet.model.faceDetector.s3fd import S3FD
-from .TalkNet.talkNet import talkNet
+from .av_consistency_model.model.faceDetector.s3fd import S3FD
+from .av_consistency_model.talkNet import talkNet
 
 import torch.multiprocessing as mp
 
