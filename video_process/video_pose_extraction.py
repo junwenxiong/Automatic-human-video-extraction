@@ -5,7 +5,7 @@ import json
 import torch
 import cv2
 import torch.multiprocessing as mp
-from .dwpose import DWposeDetector
+from .pose_detection_model import DWposeDetector
 from PIL import Image
 
 detect_results = {}

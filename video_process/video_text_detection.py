@@ -16,7 +16,7 @@ from .text_detection_model.craft import CRAFT
 from collections import OrderedDict
 import torch.multiprocessing as mp
 
-from .dwpose import DWposeDetector
+from .pose_detection_model import DWposeDetector
 from .human_segment_model.model.model import HumanMatting
 from .human_segment_model.inference import single_inference
 from PIL import Image
