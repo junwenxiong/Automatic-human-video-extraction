@@ -13,3 +13,9 @@
       5. 4 表示上半身有，下半身有，膝盖有，脚踝有
    4. 人体分割模型与文本检测模型都同时执行，过滤人体分割图与文本框重叠区域占比大于10%的视频
 4. 按音视同步信息是否同步进行过滤，检测唇动和语音相匹配的帧序列
+
+### 需要下载的权重
+
+1. dwpose/weights/dw-ll_ucoco_384.onnx
+2. dwpose/weights/yolox_l.onnx
+3. yolo_weights/yolov8x.pt
