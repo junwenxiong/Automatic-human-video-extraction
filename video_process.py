@@ -33,12 +33,12 @@ from video_process.video_av_consistency import mp_av_consistency_detect_process
 is_camera_rotating = True
 
 is_av_consistency = True
-is_text_detection = True
+is_text_detection = False
 
-is_flow_computing = True
+is_flow_computing = False
 
 is_normlize_files = False
-is_cutting_videos = True
+is_cutting_videos = False
 
 
 def split_json(input_json_path, output_dir, batch_size=10000):
@@ -71,11 +71,9 @@ def print_info(json_path, video_root):
 
 if __name__ == "__main__":
 
-    thread_num = 4
-    video_root = (
-        "/cpfs/user/xiongjunwen/workspace/Scraper/VideoProcess/Youtube_videos/batch_01"
-    )
     prefix_str = "batch_01"
+    thread_num = 4
+    video_root = f"/cpfs/user/xiongjunwen/workspace/Scraper/VideoProcess/Youtube_videos/{prefix_str}"
 
     info_json_path = os.path.join(video_root, "selected_videos_by_camera_rotating.json")
 

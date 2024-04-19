@@ -16,5 +16,5 @@
 
 ### 需要下载的权重
 
-1. download dwpose/yolox_l.onnx and dw-ll_ucoco_384.onnx, put them into ```video_process/pose_detection_model/weights``` dir
-2. download yolo_weights/yolov8x.pt and put it into ```video_process/yolo_weights``` dir
+1. download dwpose/yolox_l.onnx and dw-ll_ucoco_384.onnx, put them into ```video_process/pose_detection_model/weights``` dir.
+2. download yolo_weights/yolov8x.pt and put it into ```video_process/yolo_weights``` dir.

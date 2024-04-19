@@ -539,7 +539,7 @@ def process(arg):
     DET = S3FD(device=device)
 
     talknet = talkNet()
-    pretrain_path = "./video_process/TalkNet/pretrained_weights/pretrain_TalkSet.model"
+    pretrain_path = "./video_process/av_consistency_model/pretrained_weights/pretrain_TalkSet.model"
     talknet.loadParameters(pretrain_path)
     print("thread_id: ", thread_id, "gpu_id: ", gpu_id)
     sys.stderr.write("Model %s loaded from previous state! \r\n" % pretrain_path)

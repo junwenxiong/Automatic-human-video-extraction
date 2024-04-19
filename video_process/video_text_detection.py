@@ -341,7 +341,9 @@ def detect_one_person_wo_occlusion(arg):
 
     # Load Model
     body_segmentor = HumanMatting(backbone="resnet50")
-    body_segmentor_weight_path = "video_process/humanSeg/pretrained/SGHM-ResNet50.pth"
+    body_segmentor_weight_path = (
+        "video_process/human_segment_model/pretrained/SGHM-ResNet50.pth"
+    )
     body_segmentor.load_state_dict(
         copyStateDict(torch.load(body_segmentor_weight_path))
     )
@@ -351,7 +353,7 @@ def detect_one_person_wo_occlusion(arg):
     # 加载CRAFT模型
     text_detector = CRAFT()
     pretrained_path = (
-        "./video_process/CRAFT_pytorch/pretrained_weight/craft_mlt_25k.pth"
+        "./video_process/text_detection_model/pretrained_weight/craft_mlt_25k.pth"
     )
     print("Loading weights from checkpoint (" + pretrained_path + ")")
 

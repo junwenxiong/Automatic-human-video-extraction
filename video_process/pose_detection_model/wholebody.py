@@ -8,7 +8,7 @@ import onnxruntime as ort
 from .onnxdet import inference_detector
 from .onnxpose import inference_pose
 
-ModelDataPathPrefix = Path("./video_process/dwpose")
+ModelDataPathPrefix = Path("./video_process/pose_detection_model")
 
 
 class Wholebody:
