@@ -268,8 +268,16 @@ def count_num(directory):
 
 
 def summarize_info(
-    pose_info_path, consistency_info_path, motion_info_path, video_info_path, save_path
+    motion_info_path,
+    pose_info_path,
+    consistency_info_path,
+    camera_motion_info_path,
+    save_path,
+    date=0,
 ):
+    with open(motion_info_path, "r") as f:
+        motion_data = json.load(f)
+
     # 正规化视频文件名
     with open(pose_info_path, "r") as f:
         pose_data = json.load(f)
@@ -277,37 +285,42 @@ def summarize_info(
     with open(consistency_info_path, "r") as f:
         consistency_data = json.load(f)
 
-    with open(motion_info_path, "r") as f:
-        motion_data = json.load(f)
-
-    with open(video_info_path, "r") as f:
-        video_data = json.load(f)
+    with open(camera_motion_info_path, "r") as f:
+        camera_motion_data = json.load(f)
 
     selected_videos = {}
-    for video_path, motion_score in motion_data.items():
+    for video_path, motion_score in camera_motion_data.items():
+        print(video_path)
+
+        if video_path not in pose_data or video_path not in consistency_data:
+            continue
+
         pose_score = pose_data[video_path]
         consistency_score = consistency_data[video_path]
-        video_info = video_data[video_path]
+        optical_flow = motion_data[video_path]
 
         selected_videos[video_path] = {
+            "optical_flow": optical_flow,
             "pose_score": pose_score["pose_score"][0][0],
-            "consistency_score": consistency_score["consistency"],
-            "frame_length": consistency_score["frame_len"],
+            "frame_length": pose_score["video_length"],
             "xyxy_bbox": [
-                int(motion_score["human bbox"][0]),
-                int(motion_score["human bbox"][1]),
-                int(motion_score["human bbox"][2]),
-                int(motion_score["human bbox"][3]),
+                int(pose_score["bbox"][0]),
+                int(pose_score["bbox"][1]),
+                int(pose_score["bbox"][2]),
+                int(pose_score["bbox"][3]),
             ],
+            "fps": pose_score['fps'],
+            "resolution": pose_score['resolution'],
+            "hand_score": pose_score["hand_score"],
+            "text_score": pose_score["text_score"],
+            "bbox_area_ratio": pose_score["area_score"],
+            "consistency_score": consistency_score["consistency"],
             "motion_score": int(motion_score["camera rotating"]),
-            "resolution": video_info["resolution"],
-            "fps": video_info["fps"],
-            "audio_sample_rate": video_info["audio_sample_rate"],
         }
 
         print(selected_videos[video_path])
 
-    save_json_path = save_path + "/selected_videos_v2.json"
+    save_json_path = save_path + "/final_selected_videos_{}.json".format(date)
     save_motion_amplitudes_to_json(selected_videos, save_json_path)
 
 
@@ -315,21 +328,24 @@ class VideoInfoTask:
     def __init__(self, video_path):
         self.video_path = video_path
         self.resolution = None
-        self.fps = None
-        self.audio_sample_rate = None
+        self.fps = 0
+        self.audio_sample_rate = 0
+        self.len = 0
 
     def get_video_info(self):
         clip = VideoFileClip(self.video_path)
+        self.len = int(clip.duration * clip.fps)
         self.fps = clip.fps
         self.resolution = clip.size
         self.audio_sample_rate = clip.audio.fps if clip.audio else None
         print(
-            f"Video: {self.video_path}, FPS: {self.fps}, Resolution: {self.resolution}, Audio Sample Rate: {self.audio_sample_rate}"
+            f"Video: {self.video_path}, Len: {self.len}, FPS: {self.fps}, \
+                Resolution: {self.resolution}, Audio Sample Rate: {self.audio_sample_rate}"
         )
         clip.close()
 
 
-def get_video_info(file_path, save_path):
+def get_video_info(file_path, save_path, date=0):
     # 读取保存得分的JSON文件
     with open(file_path, "r") as f:
         data = json.load(f)
@@ -344,36 +360,41 @@ def get_video_info(file_path, save_path):
 
     selected_videos = {}
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=16
+        max_workers=32
     ) as executor:  # 指定最大线程数为8
         executor.map(lambda task: task.get_video_info(), video_info_tasks)
 
     for task in video_info_tasks:
         selected_videos[task.video_path] = {
+            "video_len": task.len,
             "resolution": task.resolution,
             "fps": task.fps,
             "audio_sample_rate": task.audio_sample_rate,
         }
 
-    # return [
-    #     {
-    #         "video_path": task.video_path,
-    #         "resolution": task.resolution,
-    #         "fps": task.fps,
-    #         "audio_sample_rate": task.audio_sample_rate,
-    #     }
-    #     for task in video_info_tasks
-    # ]
+    # 选取得分大于阈值的视频
+    final_selected_videos = {}
+    for video_path, score in selected_videos.items():
+        scale = score["resolution"]
+        video_len = score["video_len"]
 
-    save_json_path = save_path + "/selected_videos_info.json"
-    save_motion_amplitudes_to_json(selected_videos, save_json_path)
+        if scale == [1280, 720] and video_len > 60:
+            final_selected_videos[video_path] = score
+
+    save_json_path = save_path + "/selected_videos_info_{}.json".format(date)
+    save_motion_amplitudes_to_json(final_selected_videos, save_json_path)
+
+    print(
+        f"Selected videos have been saved to {save_path}, length: {len(final_selected_videos)}"
+    )
+    return save_json_path
 
 
 def resample_audio(
     video_path, target_fps=25, target_audio_fps=16000, output_path="output.mp4"
 ):
     """将视频文件的帧率和音频采样率统一为指定值
-        TODO 目前音频采样率不用统一，后续的wav2vec会进行下采样到16k
+    TODO 目前音频采样率不用统一，后续的wav2vec会进行下采样到16k
     """
     # 加载视频文件
     clip = VideoFileClip(video_path)

@@ -23,9 +23,110 @@ from PIL import Image
 from collections import OrderedDict
 from ultralytics import YOLO
 from collections import Counter
+import mediapipe
 
 detect_results = {}
 tmp_results = {}
+
+# MediaPipe Hands 初始化
+mp_hands = mediapipe.solutions.hands
+# hands = mp_hands.Hands(
+#     static_image_mode=True, max_num_hands=2, min_detection_confidence=0.5
+# )
+hands = mp_hands.Hands(
+    static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5
+)
+
+# MediaPipe Face Mesh 初始化
+mp_face_mesh = mediapipe.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(
+    static_image_mode=True, max_num_faces=1, min_detection_confidence=0.5
+)
+
+
+# 检测面部
+def detect_face(frame):
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(frame_rgb)
+    return results.multi_face_landmarks
+
+
+# 检测手部
+def detect_hands(frame):
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = hands.process(frame_rgb)
+    return results.multi_hand_landmarks
+
+
+# 计算图像的模糊度
+def calculate_blurriness(image):
+    if image is None or image.size == 0:
+        return float("inf")  # 返回一个非常大的值，表示图像是空的或无效的
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    return laplacian_var
+
+
+# 判断手部是否清晰
+def is_hand_clear(frame, hand_landmarks, threshold=100.0):
+    for hand_landmark in hand_landmarks:
+        x_coords = [lm.x for lm in hand_landmark.landmark]
+        y_coords = [lm.y for lm in hand_landmark.landmark]
+        x_min, x_max = int(min(x_coords) * frame.shape[1]), int(
+            max(x_coords) * frame.shape[1]
+        )
+        y_min, y_max = int(min(y_coords) * frame.shape[0]), int(
+            max(y_coords) * frame.shape[0]
+        )
+        hand_region = frame[y_min:y_max, x_min:x_max]
+        if hand_region.size > 0 and calculate_blurriness(hand_region) > threshold:
+            return True
+    return False
+
+
+# 判断是否正脸
+def is_face_facing_camera(face_landmarks, threshold=0.1):
+    if not face_landmarks:
+        return False
+
+    face_landmark = face_landmarks[0]
+    nose_tip = face_landmark.landmark[1]
+    left_cheek = face_landmark.landmark[234]
+    right_cheek = face_landmark.landmark[454]
+
+    nose_x = nose_tip.x
+    left_cheek_x = left_cheek.x
+    right_cheek_x = right_cheek.x
+
+    face_width = abs(right_cheek_x - left_cheek_x)
+    nose_center_ratio = abs(nose_x - (left_cheek_x + right_cheek_x) / 2) / face_width
+
+    return nose_center_ratio < threshold
+
+
+def face_hands_detect(i, frame):
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+    hand_landmarks = detect_hands(frame)
+    face_landmarks = detect_face(frame)
+
+    # 得继续实验
+    hand_clear = False
+    if hand_landmarks:
+        # import ipdb; ipdb.set_trace()
+        if len(hand_landmarks) == 2:  # 确保检测到两只手
+            # if all(
+            #     is_hand_clear(frame, [hand_landmark])
+            #     for hand_landmark in hand_landmarks
+            # ):
+            hand_clear = True
+
+    face_facing_camera = False
+    if face_landmarks:
+        face_facing_camera = is_face_facing_camera(face_landmarks)
+
+    return hand_clear, face_facing_camera
 
 
 def copyStateDict(state_dict):
@@ -42,55 +143,6 @@ def copyStateDict(state_dict):
 
 def str2bool(v):
     return v.lower() in ("yes", "y", "true", "t", "1")
-
-
-def prepare_args():
-    parser = argparse.ArgumentParser(description="CRAFT Text Detection")
-    parser.add_argument(
-        "--trained_model",
-        default="weights/craft_mlt_25k.pth",
-        type=str,
-        help="pretrained model",
-    )
-    parser.add_argument(
-        "--text_threshold", default=0.7, type=float, help="text confidence threshold"
-    )
-    parser.add_argument(
-        "--low_text", default=0.4, type=float, help="text low-bound score"
-    )
-    parser.add_argument(
-        "--link_threshold", default=0.4, type=float, help="link confidence threshold"
-    )
-    parser.add_argument(
-        "--cuda", default=True, type=str2bool, help="Use cuda for inference"
-    )
-    parser.add_argument(
-        "--canvas_size", default=1280, type=int, help="image size for inference"
-    )
-    parser.add_argument(
-        "--mag_ratio", default=1.5, type=float, help="image magnification ratio"
-    )
-    parser.add_argument(
-        "--poly", default=False, action="store_true", help="enable polygon type"
-    )
-    parser.add_argument(
-        "--show_time", default=False, action="store_true", help="show processing time"
-    )
-    parser.add_argument(
-        "--test_folder", default="/data/", type=str, help="folder path to input images"
-    )
-    parser.add_argument(
-        "--refine", default=False, action="store_true", help="enable link refiner"
-    )
-    parser.add_argument(
-        "--refiner_model",
-        default="weights/craft_refiner_CTW1500.pth",
-        type=str,
-        help="pretrained refiner model",
-    )
-
-    args = parser.parse_args()
-    return args
 
 
 def test_net(
@@ -184,9 +236,11 @@ def detect_video(arg):
         frame_list = [start_frame, mid_frame, end_frame]
 
         # 根据视频帧数调整选择的帧数
-        if total_frames > 16:
+        if total_frames > 32:
             start_frame2 = total_frames // 8  # 选择起始帧
+            start_frame3 = total_frames // 8 * 3  # 选择起始帧
             mid_frame1 = total_frames // 4  # 选择中间帧
+            start_frame4 = total_frames // 8 * 5  # 选择起始帧
             mid_frame2 = total_frames // 4 * 3  # 选择中间帧
             end_frame2 = total_frames // 8 * 7  # 选择末尾帧
             frame_list.append(start_frame2)
@@ -249,6 +303,24 @@ def detect_video(arg):
         cap.release()
 
     return results
+
+
+def draw_bbox(frame, bbox, color=(0, 255, 0), thickness=2):
+    """
+    在给定的帧上绘制 bounding box
+
+    参数:
+    frame (numpy.ndarray): 输入帧
+    bbox (tuple): bounding box 的坐标 (x, y, width, height)
+    color (tuple): 框的颜色 (B, G, R)
+    thickness (int): 框的线条宽度
+
+    返回:
+    numpy.ndarray: 绘制了 bounding box 的帧
+    """
+    x, y, x2, y2 = [int(v) for v in bbox]
+    cv2.rectangle(frame, (x, y), (x2, y2), color, thickness)
+    return frame
 
 
 def calculate_bbox_area_ratio(image_width, image_height, bbox):
@@ -325,6 +397,29 @@ def calculate_overlap(bbox, mask):
     return overlap_ratio, intersection_list
 
 
+def get_union_bbox(bbox1, bbox2):
+    """
+    计算两个 bounding box 的并集
+
+    参数:
+    bbox1 (tuple): 第一个 bounding box 的坐标 (x1, y1, x2, y2)
+    bbox2 (tuple): 第二个 bounding box 的坐标 (x1, y1, x2, y2)
+
+    返回:
+    tuple: 并集 bounding box 的坐标 (x1, y1, x2, y2)
+    """
+    x1_1, y1_1, x2_1, y2_1 = bbox1
+    x1_2, y1_2, x2_2, y2_2 = bbox2
+
+    # 计算两个 bounding box 的左上角和右下角坐标
+    x1 = min(x1_1, x1_2)
+    y1 = min(y1_1, y1_2)
+    x2 = max(x2_1, x2_2)
+    y2 = max(y2_1, y2_2)
+
+    return (x1, y1, x2, y2)
+
+
 def detect_one_person_wo_occlusion(arg):
     thread_id, gpu_id, video_lists = arg
     # 设置线程使用的GPU
@@ -369,158 +464,198 @@ def detect_one_person_wo_occlusion(arg):
         cap = cv2.VideoCapture(video_path)  # 替换为你的视频路径
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        start_frame = 0  # 选择起始帧
-        mid_frame = total_frames // 2  # 选择中间帧
-        end_frame = total_frames - 1  # 选择末尾帧
-        frame_list = [start_frame, mid_frame, end_frame]
+        # 获取视频的分辨率
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # 根据视频帧数调整选择的帧数
-        if total_frames > 32:
-            start_frame2 = total_frames // 8  # 选择起始帧
-            mid_frame1 = total_frames // 4  # 选择中间帧
-            mid_frame2 = total_frames // 4 * 3  # 选择中间帧
-            end_frame2 = total_frames // 8 * 7  # 选择末尾帧
-            frame_list.append(start_frame2)
-            frame_list.append(mid_frame1)
-            frame_list.append(mid_frame2)
-            frame_list.append(end_frame2)
+        # 获取视频的帧率
+        fps = cap.get(cv2.CAP_PROP_FPS)
 
-        pose_result_list = []
-        text_result_list = []
-        for _ in range(len(frame_list)):
-            pose_result_list.append([])
-            text_result_list.append([])
+        if width == 1280 and height == 720 and total_frames > 60:
 
-        detection_ratio = 0
-        is_body = 0
-        for i, frame_num in enumerate(frame_list):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-            ret, frame = cap.read()
+            start_frame = 0  # 选择起始帧
+            mid_frame = total_frames // 2  # 选择中间帧
+            end_frame = total_frames - 1  # 选择末尾帧
+            frame_list = [start_frame, mid_frame, end_frame]
 
-            if not ret:
-                print("Error reading frame {}".format(frame_num))
-                continue
+            # 根据视频帧数调整选择的帧数
+            if total_frames > 32:
+                start_frame2 = total_frames // 8  # 选择起始帧
+                mid_frame1 = total_frames // 4  # 选择中间帧
+                mid_frame2 = total_frames // 4 * 3  # 选择中间帧
+                end_frame2 = total_frames // 8 * 7  # 选择末尾帧
+                frame_list.append(start_frame2)
+                frame_list.append(mid_frame1)
+                frame_list.append(mid_frame2)
+                frame_list.append(end_frame2)
 
-            # 人体检测
-            body_predictions = yolo.predict(source=frame)[0]
-            cls_predictions = body_predictions.boxes.cls.tolist()  # Class labels
-            cls_count = Counter(cls_predictions)
-            # print("face detection result: ", cls_count[0.0])
+            hands_result_list = []
+            pose_result_list = []
+            text_result_list = []
+            for _ in range(len(frame_list)):
+                pose_result_list.append([])
+                text_result_list.append([])
+                hands_result_list.append([])
+            bbox = []
+            bbox_area = 0.0
+            detection_ratio = 0
+            is_body = 0
+            for i, frame_num in enumerate(frame_list):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                ret, frame = cap.read()
 
-            # 满足条件，应该跳到下一个视频
-            if 0.0 not in cls_count.keys():
-                break
-            if cls_count[0.0] > 1:
-                break
-            if 0.0 in cls_count.keys() and cls_count[0.0] == 1:
-                # 返回的是中心点坐标以及宽高
-                boxes_prediction = body_predictions.boxes.xywh.tolist()[0]
-                # 计算人体所占图像的面积比
-                bbox_area_ratio = calculate_bbox_area_ratio(
-                    frame.shape[1], frame.shape[0], boxes_prediction
-                )
-                if bbox_area_ratio < 0.2:
+                if not ret:
+                    print("Error reading frame {}".format(frame_num))
+                    continue
+
+                # 人体检测
+                body_predictions = yolo.predict(source=frame)[0]
+                cls_predictions = body_predictions.boxes.cls.tolist()  # Class labels
+                cls_count = Counter(cls_predictions)
+                # print("face detection result: ", cls_count[0.0])
+
+                # 满足条件，应该跳到下一个视频
+                if 0.0 not in cls_count.keys():
                     break
-                # 只有大于0.3的才进行姿态检测
-                if bbox_area_ratio >= 0.2:
-                    pose_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    # 使用frame进行姿态检测
-                    pose_image = Image.fromarray(pose_frame)
-                    pose_result, pose_score, is_body = pose_detector(pose_image)
-
-                    # 当is_body为-1时代表多人存在，而当is_body为0时代表上半身不存在
-                    # 但我们后续只处理单人无遮挡的视频，所以当is_body为-1/0时，
-                    # 我们认为是多人存在以及上半身不完整，放弃该视频
-                    if is_body <= 0:
+                if cls_count[0.0] > 1:
+                    break
+                if 0.0 in cls_count.keys() and cls_count[0.0] == 1:
+                    # 返回的是中心点坐标以及宽高
+                    boxes_prediction = body_predictions.boxes.xywh.tolist()[0]
+                    # 计算人体所占图像的面积比
+                    bbox_area_ratio = calculate_bbox_area_ratio(
+                        frame.shape[1], frame.shape[0], boxes_prediction
+                    )
+                    if bbox_area_ratio < 0.3:
                         break
-                    if is_body > 0:
-                        # print("pose detection result:", is_body, i, len(pose_result_list), len(frame_list))
-                        pose_result_list[i].append(is_body)
+                    # 只有大于0.3的才进行姿态检测
+                    if bbox_area_ratio >= 0.3:
+                        pose_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        # 使用frame进行姿态检测
+                        pose_image = Image.fromarray(pose_frame)
+                        pose_result, pose_score, is_body = pose_detector(pose_image)
+                        # 当is_body为-1时代表多人存在，而当is_body为0时代表上半身不存在
+                        # 但我们后续只处理单人无遮挡的视频，所以当is_body为-1/0时，
+                        # 我们认为是多人存在以及上半身不完整，放弃该视频
+                        if is_body <= 0:
+                            break
+                        if is_body > 0:
+                            pose_result_list[i].append(is_body)
 
-                        body_frame = Image.fromarray(pose_frame)
-                        # 人体分割，进行后续的判断是否存在文本与人体重叠
-                        pred_alpha, pred_mask = single_inference(
-                            body_segmentor, body_frame, device=device
-                        )
-
-                        # 对分割结果进行二值化处理
-                        body_mask = (pred_alpha * 255).astype("uint8")
-                        # print("body segmentation result:", body_mask.shape, np.unique(body_mask))
-                        body_mask[body_mask >= 128] = 255
-                        body_mask[body_mask < 128] = 0
-                        body_mask = body_mask[:, :, np.newaxis]
-
-                        rand_num = random.randint(0, 10000)
-
-                        text_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        # 使用frame进行文本检测
-                        bboxes, polys, text_score_map = test_net(
-                            text_detector,
-                            text_frame,
-                            0.7,
-                            0.4,
-                            0.4,
-                            True,
-                            False,
-                            refine_net,
-                        )
-
-                        # 计算检测结果的面积
-                        detection_area = 0
-                        detection_area, intersection_maps = calculate_overlap(
-                            polys, body_mask
-                        )
-                        detection_ratio += detection_area
-                        text_result_list[i].append(detection_area)
-
-                        # 保存文本检测结果和得分图
-                        if False and detection_area > 0.10:
-                            # mask_file = f"Temp_dir/random_images_detect_3_14/{rand_num}_text.jpg"
-                            # cv2.imwrite(mask_file, text_score_map)
-
-                            detection_area = round(detection_area, 3)
-
-                            body_predictions[0].save(
-                                filename=f"Temp_dir/random_images_detect_3_15_4/{rand_num}_{detection_area}_yolo.jpg"
+                            # 保存姿态检测结果
+                            hand_clear, face_facing_camera = face_hands_detect(
+                                i, pose_frame
                             )
-                            # cv2.imwrite(
-                            #     f"Temp_dir/random_images_detect_3_15_2/{rand_num}_{detection_area}_body.jpg",
-                            #     body_mask,
-                            # )
+                            if hand_clear:
+                                hands_result_list[i].append(1)
 
-                            text_mask = intersection_maps[0]
-                            if len(text_mask.shape) != 3:
-                                text_mask = text_mask[:, :, np.newaxis]
-
-                            for i, inter_mask in enumerate(intersection_maps[1:]):
-                                if len(inter_mask.shape) != 3:
-                                    inter_mask = inter_mask[:, :, np.newaxis]
-                                text_mask += inter_mask
-
-                            cv2.imwrite(
-                                f"Temp_dir/random_images_detect_3_15_4/{rand_num}_{detection_area}_text.jpg",
-                                text_mask,
+                            body_frame = Image.fromarray(pose_frame)
+                            # 人体分割，进行后续的判断是否存在文本与人体重叠
+                            pred_alpha, pred_mask = single_inference(
+                                body_segmentor, body_frame, device=device
                             )
-                            # pose_image.save(
-                            #     f"Temp_dir/random_images_detect_3_15_2/{rand_num}_{detection_area}_origin.jpg"
-                            # )
 
-        detection_ratio /= len(frame_list)
-        result_dict = {
-            "pose_result": pose_result_list,
-            "text_result": round(detection_ratio, 3),
-            "text_res_list": text_result_list,
-        }
-        text_results[video_path] = result_dict
-        print("{}: {}".format(video_path, result_dict))
+                            # 对分割结果进行二值化处理
+                            body_mask = (pred_alpha * 255).astype("uint8")
+                            # print("body segmentation result:", body_mask.shape, np.unique(body_mask))
+                            body_mask[body_mask >= 128] = 255
+                            body_mask[body_mask < 128] = 0
+                            body_mask = body_mask[:, :, np.newaxis]
 
-        cap.release()
+                            rand_num = random.randint(0, 10000)
+
+                            text_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            # 使用frame进行文本检测
+                            bboxes, polys, text_score_map = test_net(
+                                text_detector,
+                                text_frame,
+                                0.7,
+                                0.4,
+                                0.4,
+                                True,
+                                False,
+                                refine_net,
+                            )
+
+                            # 计算检测结果的面积
+                            detection_area = 0
+                            detection_area, intersection_maps = calculate_overlap(
+                                polys, body_mask
+                            )
+                            detection_ratio += detection_area
+                            text_result_list[i].append(detection_area)
+
+                            # 由于union_bbox的计算需要bbox的xyxy坐标，所以这里需要转换
+                            boxes_xyxy = body_predictions.boxes.xyxy.tolist()[0]
+                            if i == 0:
+                                bbox = boxes_xyxy
+                            else:
+                                union_bbox = get_union_bbox(bbox, boxes_xyxy)
+                                bbox = union_bbox
+
+                            # 保存文本检测结果和得分图
+                            if False and detection_area < 0.10:
+                                # mask_file = f"Temp_dir/random_images_detect_3_14/{rand_num}_text.jpg"
+                                # cv2.imwrite(mask_file, text_score_map)
+
+                                save_img_root = "tmp/bbox_7_04_correct"
+
+                                bbox_frame = draw_bbox(frame, bbox)
+                                cv2.imwrite(
+                                    f"{save_img_root}/{rand_num}_{detection_area}_bbox.jpg",
+                                    bbox_frame,
+                                )
+
+                                detection_area = round(detection_area, 3)
+
+                                body_predictions[0].save(
+                                    filename=f"{save_img_root}/{rand_num}_{detection_area}_yolo.jpg"
+                                )
+                                # text_mask = intersection_maps[0]
+                                # if len(text_mask.shape) != 3:
+                                #     text_mask = text_mask[:, :, np.newaxis]
+
+                                # for i, inter_mask in enumerate(intersection_maps[1:]):
+                                #     if len(inter_mask.shape) != 3:
+                                #         inter_mask = inter_mask[:, :, np.newaxis]
+                                #     text_mask += inter_mask
+
+                                # cv2.imwrite(
+                                #     f"{save_img_root}/{rand_num}_{detection_area}_text.jpg",
+                                #     text_mask,
+                                # )
+                                # pose_image.save(
+                                #     f"Temp_dir/random_images_detect_3_15_2/{rand_num}_{detection_area}_origin.jpg"
+                                # )
+
+                    bbox_area += bbox_area_ratio
+
+            bbox_ratio = bbox_area / len(frame_list)
+            detection_ratio /= len(frame_list)
+            result_dict = {
+                "pose_score": pose_result_list,
+                "hand_score": hands_result_list,
+                "text_score": round(detection_ratio, 3),
+                "area_score": round(bbox_ratio, 3),
+                "video_length": total_frames,
+                "fps": fps,
+                "resolution": [width, height],
+                "bbox": bbox,
+            }
+            text_results[video_path] = result_dict
+            print("{}: {}".format(video_path, result_dict))
+
+            cap.release()
 
     return text_results
 
 
 def mp_text_detect_process(
-    file_json, save_path, threads=2, gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7]
+    file_json,
+    save_path,
+    threads=2,
+    gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7],
+    date=0,
 ):
 
     mp.set_start_method("spawn", force=True)
@@ -537,6 +672,9 @@ def mp_text_detect_process(
         video_paths.append(os.path.join(video_path))
 
     print("All videos loaded. {} videos in total.".format(len(video_paths)))
+
+    # 单线程测试
+    # detect_one_person_wo_occlusion((0, 0, video_paths[:1000]))
 
     video_list = []
     num_threads = threads
@@ -559,7 +697,7 @@ def mp_text_detect_process(
 
     print("All threads completed.")
 
-    save_json_path = save_path + "/text_detection.json"
+    save_json_path = save_path + "/text_detection_{}.json".format(date)
     with open(save_json_path, "w", encoding="utf-8") as f:
         json.dump(results_dict, f, ensure_ascii=False)
 
@@ -568,10 +706,7 @@ def mp_text_detect_process(
 
 
 if __name__ == "__main__":
-    json_file = "Download_0308/douyin/filter_info/filter_videos_by_motion_score_30.json"
-    save_path = "Download_0308/douyin"
-
-    json_file = "/cpfs/user/xiongjunwen/workspace/Scraper/TikTokDownload/Download/douyin/selected_videos_by_optical_flow.json"
-    save_path = "/cpfs/user/xiongjunwen/workspace/Scraper/TikTokDownload/Temp_dir"
+    json_file = "Youtube_videos/batch_01/selected_videos_by_optical_flow_0704_v1.json"
+    save_path = "Select_json_for_a2p_0704_v1"
 
     mp_text_detect_process(json_file, save_path)

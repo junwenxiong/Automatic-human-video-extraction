@@ -1,5 +1,5 @@
 import os
-import torch
+import argparse
 import json
 import os
 from video_process.video_cutting import cutting_videos_in_directory
@@ -29,16 +29,6 @@ from video_process.video_motion import (
 )
 from video_process.video_text_detection import mp_text_detect_process
 from video_process.video_av_consistency import mp_av_consistency_detect_process
-
-is_camera_rotating = True
-
-is_av_consistency = True
-is_text_detection = True
-
-is_flow_computing = True
-
-is_normlize_files = True
-is_cutting_videos = True
 
 
 def split_json(input_json_path, output_dir, batch_size=10000):
@@ -71,18 +61,43 @@ def print_info(json_path, video_root):
 
 if __name__ == "__main__":
 
-    prefix_str = "batch_11"
-    thread_num = 4
-    video_root = f"/cpfs/user/xiongjunwen/workspace/Scraper/VideoProcess/Youtube_videos/{prefix_str}"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", type=str, default="TED")
+    parser.add_argument("--dataset_name", type=str, default="batch_08")
+    parser.add_argument("--date", type=str, default="0702")
+    parser.add_argument("--is_text_detection", type=int, default=0)
+    parser.add_argument("--is_av_consistency", type=int, default=0)
+    parser.add_argument("--is_camera_rotating", type=int, default=0)
+    args = parser.parse_args()
 
-    # prefix_str = "TEDxTalks"
-    # video_root = f"/cpfs/user/xiongjunwen/workspace/Scraper/VideoProcess/TED/{prefix_str}"
+    # prefix_str = "batch_11"
+    thread_num = 4
+
+    is_camera_rotating = args.is_camera_rotating
+    is_av_consistency = args.is_av_consistency
+    is_text_detection = args.is_text_detection
+
+    is_flow_computing = False
+    is_normlize_files = False
+    is_cutting_videos = False
+
+    prefix_str = args.dataset_name
+    date = args.date
+
+    if args.dataset == "TED":
+        video_root = (
+            f"/cpfs/user/xiongjunwen/workspace/Scraper/VideoProcess/TED/{prefix_str}"
+        )
+    else:
+        video_root = f"/cpfs/user/xiongjunwen/workspace/Scraper/VideoProcess/Youtube_videos/{prefix_str}"
 
     info_json_path = os.path.join(video_root, "selected_videos_by_camera_rotating.json")
 
     selected_flow_json_path = None
     selected_text_json_path = None
     selected_av_json_path = None
+    selected_video_json_path = None
+    flow_json_path = os.path.join(video_root, "motion_amplitudes.json")
 
     # 一定要记得加post文件夹
     video_dir_path = os.path.join(video_root, "post")
@@ -113,40 +128,48 @@ if __name__ == "__main__":
         )
 
         selected_flow_json_path = select_video_by_optical_flow(
-            flow_json_path, save_path, threshold_low=10, threshold_high=40
+            flow_json_path,
+            save_path,
+            threshold_low=7,
+            threshold_high=30,
+            date=date,
         )
 
     # 开始调用GPU
     # 完成单人检测-姿态检测-文本重叠
-    if is_text_detection:
+    if is_text_detection == 1:
         print("detecting text, please wait...")
         if selected_flow_json_path is None:
             selected_flow_json_path = os.path.join(
-                video_root, "selected_videos_by_optical_flow.json"
+                video_root, "selected_videos_by_optical_flow_{}.json".format(date)
             )
+            print(f"selected_video_by_optical_flow: {selected_flow_json_path}")
+
         detected_text_json_path = mp_text_detect_process(
             selected_flow_json_path,
             save_path,
             threads=thread_num,
             gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7],
+            date=date,
         )
 
-        detected_text_json_path = os.path.join(video_root, "text_detection.json")
-        save_text_fig_path = os.path.join(video_root, "text_area.png")
-        plot_text_scores(
-            detected_text_json_path,
-            save_text_fig_path,
-            title="detected text score distribution",
+        detected_text_json_path = os.path.join(
+            video_root, "text_detection_{}.json".format(date)
         )
         selected_text_json_path = select_video_by_body_pose_text_detection(
-            detected_text_json_path, save_path, text_threshold=0.10, pose_threshold=1
+            detected_text_json_path,
+            save_path,
+            text_threshold=0.10,
+            pose_threshold=1,
+            date=date,
         )
 
     # 音视同步性分析
-    if is_av_consistency:
+    if is_av_consistency == 1:
         if selected_text_json_path is None:
             selected_text_json_path = os.path.join(
-                video_root, "selected_videos_by_body_pose_text_detection.json"
+                video_root,
+                "selected_videos_by_body_pose_text_detection_{}.json".format(date),
             )
 
         print(f"detecting av consistency, please wait... {selected_text_json_path}")
@@ -157,54 +180,62 @@ if __name__ == "__main__":
             prefix_str=prefix_str,
             threads=thread_num,
             gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7],
+            date=date,
         )
 
         selected_av_json_path = select_video_by_av_consistency(
-            av_consistency_json_file, save_path
+            av_consistency_json_file,
+            save_path,
+            date=date,
         )
 
     # 视频背景运动计算
-    if is_camera_rotating:
+    if is_camera_rotating == 1:
         if selected_av_json_path is None:
             selected_av_json_path = os.path.join(
-                video_root, "selected_videos_by_av_consistency.json"
+                video_root, "selected_videos_by_av_consistency_{}.json".format(date)
+            )
+
+        if selected_text_json_path is None:
+            selected_text_json_path = os.path.join(
+                video_root,
+                "selected_videos_by_body_pose_text_detection_{}.json".format(date),
             )
 
         print(f"detecting camera rotating, please wait... {selected_av_json_path}")
 
         camera_rotating_json_file = mp_camera_rotating_detect_process(
             selected_av_json_path,
+            selected_text_json_path,
             save_path,
             threads=thread_num,
             gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7],
+            date=date,
         )
         camera_rotating_json_file = os.path.join(
-            video_root, "camera_rotating_detection.json"
+            video_root, "camera_rotating_detection_{}.json".format(date)
         )
         selected_rotating_json_path = select_video_by_camera_rotating(
-            camera_rotating_json_file, save_path
+            camera_rotating_json_file, save_path, date=date
         )
 
-    # split_json(info_json_path, os.path.join(video_root, "body_pose_text_jsons"))
-
-    # print_info(info_json_path, video_dir_path)
-
-    # 通用操作
-    video_motion_path = f"{video_root}/selected_videos_by_optical_flow.json"
-
-    pose_info_path = f"{video_root}/selected_videos_by_body_pose_text_detection.json"
-    consistency_info_path = f"{video_root}/selected_videos_by_av_consistency.json"
-    camera_motion_info_path = f"{video_root}/selected_videos_by_camera_rotating_0.json"
-
-    get_video_info(camera_motion_info_path, video_root)
-
-    select_info_path = f"{video_root}/selected_videos_info.json"
+    # # 通用操作
+    video_motion_path = f"{video_root}/selected_videos_by_optical_flow_{date}.json"
+    pose_info_path = (
+        f"{video_root}/selected_videos_by_body_pose_text_detection_{date}.json"
+    )
+    consistency_info_path = (
+        f"{video_root}/selected_videos_by_av_consistency_{date}.json"
+    )
+    camera_motion_info_path = (
+        f"{video_root}/selected_videos_by_camera_rotating_{date}.json"
+    )
 
     summarize_info(
         video_motion_path,
         pose_info_path,
         consistency_info_path,
         camera_motion_info_path,
-        select_info_path,
         video_root,
+        date=date,
     )

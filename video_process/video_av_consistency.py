@@ -125,6 +125,19 @@ class VideoInfo(object):
         subprocess.call(command, shell=True, stdout=None)
 
 
+class Config:
+    def __init__(self):
+        self.pretrainModel = "pretrain_TalkSet.model"
+        self.nDataLoaderThread = 10
+        self.facedetScale = 0.25
+        self.minTrack = 10
+        self.numFailedDet = 10
+        self.minFaceSize = 1
+        self.cropScale = 0.40
+        self.start = 0
+        self.duration = 0
+        self.evalCol = False
+
 def prepare_args():
     parser = argparse.ArgumentParser(
         description="TalkNet Demo or Columnbia ASD Evaluation"
@@ -531,7 +544,8 @@ def process(arg):
 
     thread_id, gpu_id, video_lists, prefix_str = arg
 
-    args = prepare_args()
+    # args = prepare_args()
+    args = Config()
 
     torch.cuda.set_device(gpu_id)
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
@@ -626,7 +640,7 @@ def process(arg):
 def mp_av_consistency_detect_process(
     file_json, save_path, prefix_str, threads=2, gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7],
     save_flag=0,
-
+    date=0,
 ):
     mp.set_start_method("spawn", force=True)
 
@@ -641,6 +655,7 @@ def mp_av_consistency_detect_process(
         video_paths.append(video_path)
 
     print("All videos loaded. {} videos in total.".format(len(video_paths)))
+
     video_list = []
     num_threads = threads
     batch_size = len(video_paths) // num_threads
@@ -664,7 +679,7 @@ def mp_av_consistency_detect_process(
     print("All threads completed.")
 
     if save_flag == 0:
-        save_json_path = save_path + "/av_consistency.json"
+        save_json_path = save_path + "/av_consistency_{}.json".format(date)
     else:
         save_json_path = save_path + f"/av_consistency_{save_flag}.json"
 

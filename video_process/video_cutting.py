@@ -33,6 +33,10 @@ def detect_cut(video_path, video_save_path, threshold=27.0):
     """
 
     video = open_video(video_path)
+    if video.frame_size == (640, 360):
+        print("video is too small (640, 360), skip")
+        return
+
     scene_manager = SceneManager()
     scene_manager.add_detector(ContentDetector(threshold=threshold))
     scene_manager.detect_scenes(video, show_progress=False)
@@ -55,6 +59,10 @@ def detect_cut(video_path, video_save_path, threshold=27.0):
 def cascade_cut(video_path, video_save_path):
     # Create a video manager and scene manager
     video = open_video(video_path)
+    if video.frame_size == (640, 360):
+        print("video is too small (640, 360), skip")
+        return
+
     scene_manager = SceneManager()
 
     # Add the content detectors to the scene manager
@@ -62,10 +70,10 @@ def cascade_cut(video_path, video_save_path):
     scene_manager.add_detector(ContentDetector(threshold=30))
 
     # Detector 2: Slow changes with a lower frame rate and threshold
-    scene_manager.add_detector(ContentDetector(threshold=20, min_scene_len=30))
+    scene_manager.add_detector(ContentDetector(threshold=20, min_scene_len=15))
 
     # Detector 3: Slow changes with an even lower frame rate and threshold
-    scene_manager.add_detector(ContentDetector(threshold=15, min_scene_len=30))
+    scene_manager.add_detector(ContentDetector(threshold=15, min_scene_len=15))
 
     # Perform scene detection
     scene_manager.detect_scenes(video, show_progress=False)

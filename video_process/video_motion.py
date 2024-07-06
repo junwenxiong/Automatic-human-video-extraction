@@ -461,29 +461,25 @@ def detect_camera_rotating(arg):
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
 
     # 人脸检测器
-    yolo = YOLO("./video_process/yolo_weights/yolov8x.pt")
-    yolo.to(device)
+    # yolo = YOLO("./video_process/yolo_weights/yolov8x.pt")
+    # yolo.to(device)
 
     text_results = {}
-    for video_path in video_lists:
+    for video_path, bbox in video_lists:
         cap = cv2.VideoCapture(video_path)  # 替换为你的视频路径
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         start_frame = 0  # 选择起始帧
-        mid_frame = total_frames // 2  # 选择中间帧
-        end_frame = total_frames - 1  # 选择末尾帧
-        frame_list = [start_frame, mid_frame, end_frame]
+        frame_list = []
 
         # 根据视频帧数调整选择的帧数
         if total_frames > 32:
-            start_frame2 = total_frames // 8  # 选择起始帧
-            mid_frame1 = total_frames // 4  # 选择中间帧
-            mid_frame2 = total_frames // 4 * 3  # 选择中间帧
-            end_frame2 = total_frames // 8 * 7  # 选择末尾帧
-            frame_list.append(start_frame2)
-            frame_list.append(mid_frame1)
-            frame_list.append(mid_frame2)
-            frame_list.append(end_frame2)
+            for frame in range(start_frame, total_frames, 5):
+                frame_list.append(frame)
+        else:
+            mid_frame = total_frames // 2  # 选择中间帧
+            end_frame = total_frames - 1  # 选择末尾帧
+            frame_list = [start_frame, mid_frame, end_frame]
 
         pose_result_list = []
         text_result_list = []
@@ -491,45 +487,46 @@ def detect_camera_rotating(arg):
             pose_result_list.append([])
             text_result_list.append([])
 
-        detection_ratio = 0
-        is_body = 0
-        bbox = None
-        for i, frame_num in enumerate(frame_list):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-            ret, frame = cap.read()
+        # detection_ratio = 0
+        # is_body = 0
+        # bbox = None
+        # for i, frame_num in enumerate(frame_list):
+        #     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+        #     ret, frame = cap.read()
 
-            if not ret:
-                print("Error reading frame {}".format(frame_num))
-                continue
+        #     if not ret:
+        #         print("Error reading frame {}".format(frame_num))
+        #         continue
 
-            # 人体检测
-            body_predictions = yolo.predict(source=frame)[0]
+            # # 人体检测
+            # body_predictions = yolo.predict(source=frame)[0]
 
-            # body_predictions.save(filename=f"{save_dir}/{rand_num}_result.jpg")
+            # # body_predictions.save(filename=f"{save_dir}/{rand_num}_result.jpg")
 
-            cls_predictions = body_predictions.boxes.cls.tolist()  # Class labels
-            cls_count = Counter(cls_predictions)
+            # cls_predictions = body_predictions.boxes.cls.tolist()  # Class labels
+            # cls_count = Counter(cls_predictions)
 
-            # 满足条件，应该跳到下一个视频
-            if 0.0 not in cls_count.keys():
-                break
-            if cls_count[0.0] > 1:
-                break
-            if 0.0 in cls_count.keys() and cls_count[0.0] == 1:
-                boxes_prediction = body_predictions.boxes.xyxy.tolist()[0]
+            # # 满足条件，应该跳到下一个视频
+            # if 0.0 not in cls_count.keys():
+            #     break
+            # if cls_count[0.0] > 1:
+            #     break
+            # if 0.0 in cls_count.keys() and cls_count[0.0] == 1:
+            #     boxes_prediction = body_predictions.boxes.xyxy.tolist()[0]
 
-                if i == 0:
-                    bbox = boxes_prediction
-                else:
-                    union_bbox = get_union_bbox(bbox, boxes_prediction)
-                    bbox = union_bbox
+            #     if i == 0:
+            #         bbox = boxes_prediction
+            #     else:
+            #         union_bbox = get_union_bbox(bbox, boxes_prediction)
+            #         bbox = union_bbox
 
         # bbox_frame = draw_bbox(frame, bbox)
         # rand_num = random.randint(0, 1000)
 
+        # TODO 加入bbox信息
         frame_count = 1
         total_flow_magnitude = 0.0
-        optical_flow_fps = 5
+        optical_flow_fps = 10
 
         prev_gray = None
         while cap.isOpened():
@@ -583,14 +580,14 @@ def detect_camera_rotating(arg):
         print(video_path, average_flow_magnitude)
         text_results[video_path] = {
             "camera rotating": average_flow_magnitude,
-            "human bbox": bbox}
+        }
 
     return text_results
 
 
 def mp_camera_rotating_detect_process(
-    file_json, save_path, threads=2, gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7],
-    save_flag=0
+    file_json, bbox_json, save_path, threads=2, gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7], save_flag=0,
+    date=0,
 ):
 
     mp.set_start_method("spawn", force=True)
@@ -601,14 +598,21 @@ def mp_camera_rotating_detect_process(
     ) as f:
         data = json.load(f)
 
+    with open(bbox_json, "r") as f:
+        bbox_data = json.load(f)
+
     # 提取视频路径和得分
     video_paths = []
+    video_bbox = []
     for i, (video_path, score) in enumerate(data.items()):
-        video_paths.append(os.path.join(video_path))
+        if video_path not in bbox_data.keys():
+            continue
+        video_paths.append([os.path.join(video_path), bbox_data[video_path]['bbox']])
 
     print("All videos loaded. {} videos in total.".format(len(video_paths)))
 
     video_list = []
+    bbox_list = []
     num_threads = threads
     batch_size = len(video_paths) // num_threads
     for i in range(num_threads):
@@ -630,7 +634,7 @@ def mp_camera_rotating_detect_process(
     print("All threads completed.")
 
     if save_flag == 0:
-        save_json_path = save_path + f"/camera_rotating_detection.json"
+        save_json_path = save_path + f"/camera_rotating_detection_{date}.json"
     else:
         save_json_path = save_path + f"/camera_rotating_detection_{save_flag}.json"
     with open(save_json_path, "w", encoding="utf-8") as f:
@@ -654,11 +658,12 @@ if __name__ == "__main__":
         data = json.load(f)
 
     save_dir = "Temp_dir/motion_detect"
+    video_input_path = "test"
     # 提取视频路径和得分
     video_paths = []
-    for i, (video_path, score) in enumerate(data.items()):
-        video_paths.append(os.path.join(video_path))
-        print(video_path)
-        # 示例用法
-        avg_flow_mag = detect_camera_rotating(video_path, save_dir)
-        print(avg_flow_mag)
+    for i, (video_name) in enumerate(os.listdir(video_input_path)):
+        video_paths.append(os.path.join(video_input_path, video_name))
+
+    arg = (0, 0, video_paths)
+    avg_flow_mag = detect_camera_rotating(arg)
+    print(avg_flow_mag)
