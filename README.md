@@ -16,5 +16,10 @@
 
 ### 需要下载的权重
 
+google drive分享链接： https://drive.google.com/drive/folders/1Gz_yDjnzC4jMlgJqTIc3_TNEuOWuAuaG?usp=sharing
+
 1. download dwpose/yolox_l.onnx and dw-ll_ucoco_384.onnx, put them into ```video_process/pose_detection_model/weights``` dir.
 2. download yolo_weights/yolov8x.pt and put it into ```video_process/yolo_weights``` dir.
+3. video_process/av_consistency_model/pretrained_weights/pretrain_TalkSet.model
+4. video_process/human_segment_model/pretrained/SGHM-ResNet50.pth
+5. video_process/text_detection_model/pretrained_weight/craft_mlt_25k.pth
