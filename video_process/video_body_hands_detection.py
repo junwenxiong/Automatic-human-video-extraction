@@ -10,20 +10,23 @@ import cv2
 import mediapipe
 import torch.nn as nn
 import numpy as np
-from .text_detection_model import craft_utils
-from .text_detection_model import imgproc
+from video_process.text_detection_model import craft_utils
+from video_process.text_detection_model import imgproc
 import json
-from .text_detection_model.craft import CRAFT
+from video_process.text_detection_model.craft import CRAFT
 from collections import OrderedDict
 import torch.multiprocessing as mp
 
-from .pose_detection_model import DWposeDetector
-from .human_segment_model.model.model import HumanMatting
-from .human_segment_model.inference import single_inference
+from video_process.pose_detection_model import DWposeDetector
+from video_process.human_segment_model.model.model import HumanMatting
+from video_process.human_segment_model.inference import single_inference
 from PIL import Image
 from collections import OrderedDict
 from ultralytics import YOLO
 from collections import Counter
+
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 detect_results = {}
 tmp_results = {}
@@ -326,10 +329,6 @@ def calculate_overlap(bbox, mask):
     return overlap_ratio, intersection_list
 
 
-# def detect_one_person_wo_occlusion(arg):
-#     thread_id, gpu_id, video_lists = arg
-
-
 # MediaPipe Hands 初始化
 mp_hands = mediapipe.solutions.hands
 # hands = mp_hands.Hands(
@@ -438,155 +437,190 @@ def detect_one_person_wo_occlusion(arg):
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
 
     # 人脸检测器
-    yolo = YOLO("./video_process/yolo_weights/yolov8x.pt")
-    yolo.to(device)
+    # yolo = YOLO("./video_process/yolo_weights/yolov8x.pt")
+    # yolo.to(device)
 
     # 加载pose检测模型
     pose_detector = DWposeDetector()
     pose_detector = pose_detector.to(device)
 
-    # Load Model
-    body_segmentor = HumanMatting(backbone="resnet50")
-    body_segmentor_weight_path = (
-        "video_process/human_segment_model/pretrained/SGHM-ResNet50.pth"
-    )
-    body_segmentor.load_state_dict(
-        copyStateDict(torch.load(body_segmentor_weight_path))
-    )
-    body_segmentor = body_segmentor.cuda()
-    body_segmentor.eval()
-
-    # 加载CRAFT模型
-    text_detector = CRAFT()
-    pretrained_path = (
-        "./video_process/text_detection_model/pretrained_weight/craft_mlt_25k.pth"
-    )
-    print("Loading weights from checkpoint (" + pretrained_path + ")")
-
-    text_detector.load_state_dict(copyStateDict(torch.load(pretrained_path)))
-    text_detector = text_detector.cuda()
-    cudnn.benchmark = False
-    text_detector.eval()
-
     # LinkRefiner
     refine_net = None
     text_results = {}
     for video_path in video_lists:
-        cap = cv2.VideoCapture(video_path)  # 替换为你的视频路径
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        # 用于保存检测结果
-        rand_num = random.randint(0, 100000)
+        with VideoFileClip(video_path) as video:
+            video_duration = video.duration
+            fps = video.fps
 
-        start_frame = 0  # 选择起始帧
-        mid_frame = total_frames // 2  # 选择中间帧
-        end_frame = total_frames - 1  # 选择末尾帧
-        frame_list = [start_frame, mid_frame, end_frame]
+            # 获取视频文件名（不包含扩展名）
+            video_name = os.path.splitext(os.path.basename(video_path))[0]
 
-        # 根据视频帧数调整选择的帧数
-        if total_frames > 32:
-            start_frame2 = total_frames // 8  # 选择起始帧
-            start_frame3 = total_frames // 8 * 3  # 选择起始帧
-            mid_frame1 = total_frames // 4  # 选择中间帧
-            start_frame4 = total_frames // 8 * 5  # 选择起始帧
-            mid_frame2 = total_frames // 4 * 3  # 选择中间帧
-            end_frame2 = total_frames // 8 * 7  # 选择末尾帧
+            start_time = 0
+            end_time = video_duration
 
-            frame_list.append(start_frame2)
-            frame_list.append(start_frame3)
-            frame_list.append(mid_frame1)
-            frame_list.append(start_frame4)
-            frame_list.append(mid_frame2)
-            frame_list.append(end_frame2)
+            # 提取并检测视频帧
+            for time in [0, video_duration]:
+                frame = video.get_frame(time)
+                pose_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # 使用frame进行姿态检测
+                pose_image = Image.fromarray(pose_frame)
+                pose_result, pose_score, is_body = pose_detector(pose_image)
 
-        pose_result_list = []
-        text_result_list = []
-        for _ in range(len(frame_list)):
-            pose_result_list.append([])
-            text_result_list.append([])
+                if is_body <= 0:
+                    if time == 0:
+                        start_time += 1 / fps
+                    else:
+                        end_time -= 1 / fps
+                if is_body > 0:
+                    if time == 0:
+                        start_time = 0
+                    else:
+                        end_time = video_duration
 
-        detection_ratio = 0
-        is_body = 0
-        for i, frame_num in enumerate(frame_list):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-            ret, frame = cap.read()
+            print(
+                "video_path: ",
+                video_path,
+                "start_time: ",
+                start_time - 0,
+                "end_time: ",
+                end_time - video_duration,
+            )
 
-            if not ret:
-                print("Error reading frame {}".format(frame_num))
-                continue
-
-            # 人体检测
-            body_predictions = yolo.predict(source=frame)[0]
-            cls_predictions = body_predictions.boxes.cls.tolist()  # Class labels
-            cls_count = Counter(cls_predictions)
-            # print("face detection result: ", cls_count[0.0])
-
-            # 满足条件，应该跳到下一个视频
-            if 0.0 not in cls_count.keys():
-                break
-            if cls_count[0.0] > 1:
-                break
-            if 0.0 in cls_count.keys() and cls_count[0.0] == 1:
-                # 返回的是中心点坐标以及宽高
-                boxes_prediction = body_predictions.boxes.xywh.tolist()[0]
-                # 计算人体所占图像的面积比
-                bbox_area_ratio = calculate_bbox_area_ratio(
-                    frame.shape[1], frame.shape[0], boxes_prediction
-                )
-                if bbox_area_ratio < 0.2:
-                    pose_result_list[i].append(2)
-                    break
-                # 只有大于0.3的才进行姿态检测
-                if bbox_area_ratio >= 0.2:
-                    pose_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    # 使用frame进行姿态检测
-                    pose_image = Image.fromarray(pose_frame)
-                    pose_result, pose_score, is_body = pose_detector(pose_image)
-
-                    if is_body <= 0:
-                        pose_result_list[i].append(3)
-                        break
-                    if is_body > 0:
-
-                        # 保存姿态检测结果
-                        hand_clear, face_facing_camera = face_hands_detect(
-                            i, pose_frame
-                        )
-
-                        if hand_clear:
-                            pose_result_list[i].append(1)
-
-                        # 保存文本检测结果和得分图
-                        if True and hand_clear:
-                            detection_area = i
-                            save_path = "tmp/images_detect_6_29"
-                            os.makedirs(save_path, exist_ok=True)
-
-                            detection_area = round(detection_area, 3)
-
-                            body_predictions[0].save(
-                                filename=f"{save_path}/{rand_num}_{detection_area}_yolo.jpg"
-                            )
-
-                            # pose_result.save(
-                            #     f"{save_path}/{rand_num}_{detection_area}_pose.jpg"
-                            # )
-
-        detection_ratio /= len(frame_list)
         result_dict = {
-            "pose_result": pose_result_list,
-            "bbox_area_ratio": bbox_area_ratio,
+            "start_time": start_time - 0,
+            "end_time": end_time - video_duration,
         }
         text_results[video_path] = result_dict
-        print("{}: {}".format(video_path, result_dict))
 
-        cap.release()
+        # 裁剪视频
+        # cleaned_video = video.subclip(start_time, end_time)
+
+        # 检查输出目录是否存在，不存在则创建
+        # if not os.path.exists(output_path):
+        # os.makedirs(output_path)
+
+        # 保存裁剪后的视频
+        # output_file = os.path.join(output_path, f"cleaned_{video_name}.mp4")
+        # cleaned_video.write_videofile(
+        # output_file, codec="libx264", audio_codec="aac"
+        # )
+
+        # cap = cv2.VideoCapture(video_path)  # 替换为你的视频路径
+        # total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        # # 用于保存检测结果
+        # rand_num = random.randint(0, 100000)
+
+        # start_frame = 0  # 选择起始帧
+        # mid_frame = total_frames // 2  # 选择中间帧
+        # end_frame = total_frames - 1  # 选择末尾帧
+        # frame_list = [start_frame, mid_frame, end_frame]
+
+        # # 根据视频帧数调整选择的帧数
+        # if total_frames > 32:
+        #     start_frame2 = total_frames // 8  # 选择起始帧
+        #     start_frame3 = total_frames // 8 * 3  # 选择起始帧
+        #     mid_frame1 = total_frames // 4  # 选择中间帧
+        #     start_frame4 = total_frames // 8 * 5  # 选择起始帧
+        #     mid_frame2 = total_frames // 4 * 3  # 选择中间帧
+        #     end_frame2 = total_frames // 8 * 7  # 选择末尾帧
+
+        #     frame_list.append(start_frame2)
+        #     frame_list.append(start_frame3)
+        #     frame_list.append(mid_frame1)
+        #     frame_list.append(start_frame4)
+        #     frame_list.append(mid_frame2)
+        #     frame_list.append(end_frame2)
+
+        # pose_result_list = []
+        # text_result_list = []
+        # for _ in range(len(frame_list)):
+        #     pose_result_list.append([])
+        #     text_result_list.append([])
+
+        # detection_ratio = 0
+        # is_body = 0
+        # for i, frame_num in enumerate(frame_list):
+        #     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+        #     ret, frame = cap.read()
+
+        #     if not ret:
+        #         print("Error reading frame {}".format(frame_num))
+        #         continue
+
+        #     # 人体检测
+        #     body_predictions = yolo.predict(source=frame)[0]
+        #     cls_predictions = body_predictions.boxes.cls.tolist()  # Class labels
+        #     cls_count = Counter(cls_predictions)
+        #     # print("face detection result: ", cls_count[0.0])
+
+        #     # 满足条件，应该跳到下一个视频
+        #     if 0.0 not in cls_count.keys():
+        #         break
+        #     if cls_count[0.0] > 1:
+        #         break
+        #     if 0.0 in cls_count.keys() and cls_count[0.0] == 1:
+        #         # 返回的是中心点坐标以及宽高
+        #         boxes_prediction = body_predictions.boxes.xywh.tolist()[0]
+        #         # 计算人体所占图像的面积比
+        #         bbox_area_ratio = calculate_bbox_area_ratio(
+        #             frame.shape[1], frame.shape[0], boxes_prediction
+        #         )
+        #         if bbox_area_ratio < 0.2:
+        #             pose_result_list[i].append(2)
+        #             break
+        #         # 只有大于0.3的才进行姿态检测
+        #         if bbox_area_ratio >= 0.2:
+        #             pose_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        #             # 使用frame进行姿态检测
+        #             pose_image = Image.fromarray(pose_frame)
+        #             pose_result, pose_score, is_body = pose_detector(pose_image)
+
+        #             if is_body <= 0:
+        #                 pose_result_list[i].append(3)
+        #                 break
+        #             if is_body > 0:
+
+        #                 # 保存姿态检测结果
+        #                 hand_clear, face_facing_camera = face_hands_detect(
+        #                     i, pose_frame
+        #                 )
+
+        #                 if hand_clear:
+        #                     pose_result_list[i].append(1)
+
+        #                 # 保存文本检测结果和得分图
+        #                 if True and hand_clear:
+        #                     detection_area = i
+        #                     save_path = "tmp/images_detect_6_29"
+        #                     os.makedirs(save_path, exist_ok=True)
+
+        #                     detection_area = round(detection_area, 3)
+
+        #                     body_predictions[0].save(
+        #                         filename=f"{save_path}/{rand_num}_{detection_area}_yolo.jpg"
+        #                     )
+
+        #                     # pose_result.save(
+        #                     #     f"{save_path}/{rand_num}_{detection_area}_pose.jpg"
+        #                     # )
+
+        # detection_ratio /= len(frame_list)
+        # result_dict = {
+        #     "pose_result": pose_result_list,
+        #     "bbox_area_ratio": bbox_area_ratio,
+        # }
+        # text_results[video_path] = result_dict
+        # print("{}: {}".format(video_path, result_dict))
+
+        # cap.release()
 
     return text_results
 
 
 def mp_body_hands_detect_process(
-    file_json, save_path, threads=2, gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7]
+    file_json, save_path, threads=2, gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7], video_flag="TED"
 ):
 
     mp.set_start_method("spawn", force=True)
@@ -628,7 +662,7 @@ def mp_body_hands_detect_process(
 
     print("All threads completed.")
 
-    save_json_path = save_path + "/refined_body_hands_detection_0702.json"
+    save_json_path = save_path + f"/{video_flag}_refined_body_hands_det_0713.json"
     with open(save_json_path, "w", encoding="utf-8") as f:
         json.dump(results_dict, f, ensure_ascii=False)
 
@@ -638,7 +672,7 @@ def mp_body_hands_detect_process(
 
 if __name__ == "__main__":
 
-    json_file = "/cpfs/user/xiongjunwen/workspace/Scraper/VideoProcess/Select_json_for_a2p_0612/TED_videos_selected_videos_by_length_60.json"
+    json_file = "Select_json_for_a2p_0704_v1/TED_videos_selected_videos_0704_v1_cutting_filtered.json"
     save_path = "/cpfs/user/xiongjunwen/workspace/Scraper/VideoProcess/tmp"
 
     mp_body_hands_detect_process(json_file, save_path)

@@ -61,10 +61,11 @@ def save_motion_amplitudes_to_json(motion_amplitudes, output_file):
 
     print(f"Motion amplitudes saved to {output_file}")
 
+
 def dict_slice(d, start, end):
     """
     对字典进行切片操作。
-    
+
     :param d: 原始字典
     :param start: 起始索引
     :param end: 结束索引
@@ -72,6 +73,7 @@ def dict_slice(d, start, end):
     """
     items = list(d.items())[start:end]
     return dict(items)
+
 
 def select_video_by_optical_flow(
     file_path, save_path, threshold_low=10, threshold_high=40, date=1
@@ -103,7 +105,9 @@ def select_video_by_optical_flow(
     save_json_path = save_path + "/selected_videos_by_optical_flow_{}.json".format(date)
     save_motion_amplitudes_to_json(selected_videos, save_json_path)
 
-    print(f"Selected videos have been saved to {save_path}, length: {len(selected_videos)}")
+    print(
+        f"Selected videos have been saved to {save_path}, length: {len(selected_videos)}"
+    )
 
     return save_json_path
 
@@ -134,7 +138,9 @@ def select_video_by_text_detection(file_path, save_path, threshold_low=0.025):
     save_json_path = save_path + "/selected_videos_by_text_detection.json"
     save_motion_amplitudes_to_json(selected_videos, save_json_path)
 
-    print(f"Selected videos have been saved to {save_path}, length: {len(selected_videos)}")
+    print(
+        f"Selected videos have been saved to {save_path}, length: {len(selected_videos)}"
+    )
 
     return save_json_path
 
@@ -174,7 +180,7 @@ def select_video_by_body_pose_text_detection(
                 else:
                     is_pose_score.append(False)
 
-            if False not in is_pose_score and count >= int(len(hand_score)//2):
+            if False not in is_pose_score and count >= int(len(hand_score) // 2):
                 selected_videos[video_path] = score
             else:
                 vide_dirs = video_path.split("/")
@@ -187,7 +193,9 @@ def select_video_by_body_pose_text_detection(
             # os.makedirs(tmp_low_folder, exist_ok=True)
             # shutil.copy(video_path, tmp_low_folder)
 
-    save_json_path = save_path + "/selected_videos_by_body_pose_text_detection_{}.json".format(date)
+    save_json_path = (
+        save_path + "/selected_videos_by_body_pose_text_detection_{}.json".format(date)
+    )
     save_motion_amplitudes_to_json(selected_videos, save_json_path)
 
     print(f"Selected videos have been saved to {save_path}")
@@ -220,7 +228,7 @@ def select_video_by_pose_detection(file_path, save_path, date):
         # 统计这里面的[1]的个数
         body_hands_scroe = score["pose_result"]
         count = sum(1 for s in body_hands_scroe if 1 in s)
-        if count >= int(len(body_hands_scroe)//2):  # 大于一半就认为手部是出现的
+        if count >= int(len(body_hands_scroe) // 2):  # 大于一半就认为手部是出现的
             selected_videos[video_path] = score
         # else:
         #     vide_dirs = video_path.split("/")
@@ -228,7 +236,10 @@ def select_video_by_pose_detection(file_path, save_path, date):
         #     os.makedirs(tmp_low_folder, exist_ok=True)
         #     shutil.copy(video_path, tmp_low_folder)
 
-    save_json_path = save_path + "/selected_videos_by_refined_body_hands_detection_{}.json".format(date)
+    save_json_path = (
+        save_path
+        + "/selected_videos_by_refined_body_hands_detection_{}.json".format(date)
+    )
 
     save_motion_amplitudes_to_json(selected_videos, save_json_path)
 
@@ -302,7 +313,9 @@ def select_video_by_av_consistency(file_path, save_path, save_flag=0, date=0):
         #     shutil.copy(video_path, tmp_low_folder)
 
     if save_flag == 0:
-        save_json_path = save_path + "/selected_videos_by_av_consistency_{}.json".format(date)
+        save_json_path = (
+            save_path + "/selected_videos_by_av_consistency_{}.json".format(date)
+        )
     else:
         save_json_path = (
             save_path + f"/selected_videos_by_av_consistency_{save_flag}.json"
@@ -379,12 +392,16 @@ def select_video_by_multi_vars(file_path, save_path, flag):
 
         pose_arr_path = video_path.replace("cascade_cut", "dwpose_array")
         pose_arr_path = pose_arr_path.replace("mp4", "npy")
-        # print(pose_arr_path)
 
-        if optical_flow < 15 and scale == [1280, 720] and motion == 0:
-            if os.path.exists(pose_arr_path):
+        audio_path = video_path.replace("cascade_cut", "audio_files")
+        audio_path = audio_path.replace(".mp4", "_denoised.wav")
+
+        if scale == [1280, 720] and motion == 0:
+            if os.path.exists(pose_arr_path) and os.path.exists(audio_path):
                 score["pose"] = pose_arr_path
-            selected_videos[video_path] = score
+                score["audio_path"] = audio_path
+
+                selected_videos[video_path] = score
         # else:
         #     vide_dirs = video_path.split("/")
         #     tmp_low_folder = low_folder + "/" + vide_dirs[-3] + "/" + vide_dirs[-2]
@@ -435,6 +452,7 @@ def is_bbox_valid(bbox, width, height):
         return False
     return True
 
+
 def draw_bbox(frame, bbox, color=(0, 255, 0), thickness=2):
     """
     在给定的帧上绘制 bounding box
@@ -451,6 +469,7 @@ def draw_bbox(frame, bbox, color=(0, 255, 0), thickness=2):
     x, y, x2, y2 = [int(v) for v in bbox]
     cv2.rectangle(frame, (x, y), (x2, y2), color, thickness)
     return frame
+
 
 def select_video_by_check_bbox(file_path, save_path, flag):
     """只保存optical_flow<40, scale:[1280, 720],motion:0的数据
@@ -481,27 +500,56 @@ def select_video_by_check_bbox(file_path, save_path, flag):
 
         if check_result:
             selected_videos[video_path] = score
-            cv2.imwrite(f"tmp/bbox_7_04_correct/{video_path.split('/')[-1].split('.')[0]}.jpg", frame)
-        else: 
-            cv2.imwrite(f"tmp/bbox_6_04/{video_path.split('/')[-1].split('.')[0]}.jpg", frame)
+            cv2.imwrite(
+                f"tmp/bbox_7_04_correct/{video_path.split('/')[-1].split('.')[0]}.jpg",
+                frame,
+            )
+        else:
+            cv2.imwrite(
+                f"tmp/bbox_6_04/{video_path.split('/')[-1].split('.')[0]}.jpg", frame
+            )
             print(video_path, bbox)
-    
+
     save_json_path = save_path + f"/selected_videos_by_bbox.json"
-    save_motion_amplitudes_to_json(selected_videos, save_json_path) 
-    
+    save_motion_amplitudes_to_json(selected_videos, save_json_path)
+
     print(len(selected_videos))
     print(f"Selected videos have been saved to {save_path}")
     return save_json_path
 
+
 if __name__ == "__main__":
 
-    json_file = f"Select_json_for_a2p_0704_v1/Youtube_batch01_selected_videos_0704_v1.json"
-    save_path = "Select_json_for_a2p_0704_v1"
+    # flag = "TED_videos"
+    # flag="TEDxTalks"
+    # flag="Youtube_batch10"
+    flag_list = [
+        "TED_videos",
+        "TEDxTalks",
+        "Youtube_batch10",
+        "Youtube_batch01",
+        "Youtube_batch02",
+        "Youtube_batch03",
+        "Youtube_batch04",
+        "Youtube_batch05",
+        "Youtube_batch06",
+        "Youtube_batch07",
+        "Youtube_batch08",
+        "Youtube_batch09",
+        "Youtube_batch11",
+    ]
 
-    select_video_by_check_bbox(json_file, save_path, "Youtube_batch01")
+    # select_video_by_check_bbox(json_file, save_path, "Youtube_batch01")
 
     # plot_flow_scores(score_files, img_save_path, title="detected text score distribution")
-    # select_video_by_multi_vars(json_file, save_path, flag)
+
+    save_path = "Select_json_for_a2p_0704_v1"
+
+    for flag in flag_list:
+        json_file = (
+            f"Select_json_for_a2p_0704_v1/{flag}_selected_videos_0704_v1_cutting_filtered.json"
+        )
+        select_video_by_multi_vars(json_file, save_path, flag)
 
     # json_file2 = f"Select_json/{flag}_selected_videos_by_multi_vars.json"
     # select_video_by_length(json_file2, save_path, flag)

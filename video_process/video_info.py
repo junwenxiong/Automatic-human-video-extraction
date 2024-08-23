@@ -272,6 +272,7 @@ def summarize_info(
     pose_info_path,
     consistency_info_path,
     camera_motion_info_path,
+    denoised_audio_json_path,
     save_path,
     date=0,
 ):
@@ -287,6 +288,9 @@ def summarize_info(
 
     with open(camera_motion_info_path, "r") as f:
         camera_motion_data = json.load(f)
+    
+    with open(denoised_audio_json_path, "r") as f:
+        audio_data = json.load(f)
 
     selected_videos = {}
     for video_path, motion_score in camera_motion_data.items():
@@ -309,13 +313,14 @@ def summarize_info(
                 int(pose_score["bbox"][2]),
                 int(pose_score["bbox"][3]),
             ],
-            "fps": pose_score['fps'],
-            "resolution": pose_score['resolution'],
+            "fps": pose_score["fps"],
+            "resolution": pose_score["resolution"],
             "hand_score": pose_score["hand_score"],
             "text_score": pose_score["text_score"],
             "bbox_area_ratio": pose_score["area_score"],
             "consistency_score": consistency_score["consistency"],
             "motion_score": int(motion_score["camera rotating"]),
+            "audio_path": audio_data[video_path]["audio_denoising"],
         }
 
         print(selected_videos[video_path])
@@ -331,6 +336,7 @@ class VideoInfoTask:
         self.fps = 0
         self.audio_sample_rate = 0
         self.len = 0
+        self.audio_path = None
 
     def get_video_info(self):
         clip = VideoFileClip(self.video_path)
@@ -343,6 +349,26 @@ class VideoInfoTask:
                 Resolution: {self.resolution}, Audio Sample Rate: {self.audio_sample_rate}"
         )
         clip.close()
+
+    def extract_audio(self):
+        out_path = self.video_path.replace("cascade_cut", "audio_files")
+        out_path = out_path.replace(".mp4", ".wav")
+
+        if os.path.exists(out_path):
+            return
+
+        out_path_dir = os.path.dirname(out_path)
+        os.makedirs(out_path_dir, exist_ok=True)
+        out_path_name = os.path.basename(out_path)
+        out_path_name = out_path_name.replace(".mp4", ".wav")
+
+        try:
+            with VideoFileClip(self.video_path) as video:
+                audio = video.audio
+                audio.write_audiofile(out_path)
+            self.audio_path = out_path
+        except Exception as e:
+            print(f"Error extracting audio from {self.video_path}: {e}")
 
 
 def get_video_info(file_path, save_path, date=0):
@@ -409,6 +435,35 @@ def resample_audio(
 
     # 保存处理后的视频文件
     clip.write_videofile(output_path)
+
+
+def get_audio_info(file_path, save_path, date=0):
+    # 读取保存得分的JSON文件
+    with open(file_path, "r") as f:
+        data = json.load(f)
+
+    print("Total number of videos: ", len(data))
+
+    video_files = []
+    for video_path, score in data.items():
+        video_files.append(video_path)
+
+    video_info_tasks = [VideoInfoTask(video_path) for video_path in video_files]
+
+    selected_videos = {}
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=32
+    ) as executor:  # 指定最大线程数为8
+        executor.map(lambda task: task.extract_audio(), video_info_tasks)
+
+    for task in video_info_tasks:
+        selected_videos[task.video_path] = {
+            "audio_path": task.audio_path,
+        }
+
+    save_json_path = save_path + "/selected_videos_audio_{}.json".format(date)
+    save_motion_amplitudes_to_json(selected_videos, save_json_path)
+    return save_json_path
 
 
 if __name__ == "__main__":

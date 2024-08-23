@@ -25,6 +25,9 @@ from ultralytics import YOLO
 from collections import Counter
 import mediapipe
 
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 detect_results = {}
 tmp_results = {}
 
@@ -704,6 +707,102 @@ def mp_text_detect_process(
     print(f"Detected results saved to {save_json_path}")
     return save_json_path
 
+
+def load_video_info(json_path):
+    with open(json_path, "r") as f:
+        video_info = json.load(f)
+    return video_info
+
+
+def save_slice_info(slice_info, output_json_path):
+    with open(output_json_path, "w") as f:
+        json.dump(slice_info, f, indent=4)
+
+
+def detect_human(frame, human_cascade):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    humans = human_cascade.detectMultiScale(
+        gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
+    )
+    return len(humans) > 0
+
+
+def clean_video(video_path, output_path, human_cascade):
+    with VideoFileClip(video_path) as video:
+        video_duration = video.duration
+        fps = video.fps
+
+        # 获取视频文件名（不包含扩展名）
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+
+        # 创建临时目录用于存储帧
+        temp_dir = os.path.join(output_path, "temp_frames")
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir)
+
+        start_time = 0
+        end_time = video_duration
+
+        # 提取并检测视频帧
+        for time in [0, video_duration - 1]:
+            frame = video.get_frame(time)
+            if detect_human(frame, human_cascade):
+                if time == 0:
+                    start_time = 0
+                else:
+                    end_time = video_duration
+            else:
+                if time == 0:
+                    start_time += 1 / fps
+                else:
+                    end_time -= 1 / fps
+
+        # 删除临时目录
+        for file in os.listdir(temp_dir):
+            os.remove(os.path.join(temp_dir, file))
+        os.rmdir(temp_dir)
+
+        # 裁剪视频
+        cleaned_video = video.subclip(start_time, end_time)
+
+        # 检查输出目录是否存在，不存在则创建
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+
+        # 保存裁剪后的视频
+        output_file = os.path.join(output_path, f"cleaned_{video_name}.mp4")
+        cleaned_video.write_videofile(output_file, codec="libx264", audio_codec="aac")
+
+        return {
+            "video_name": f"cleaned_{video_name}.mp4",
+            "duration": end_time - start_time,
+        }
+
+
+def process_videos(json_path, output_path, output_json_path, max_workers=4):
+    video_info = load_video_info(json_path)
+    slice_info = []
+
+    human_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_fullbody.xml"
+    )
+
+    tasks = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for video_path in video_info.keys():
+            tasks.append(
+                executor.submit(clean_video, video_path, output_path, human_cascade)
+            )
+
+        for future in as_completed(tasks):
+            try:
+                result = future.result()
+                slice_info.append(result)
+                print(f'Processed {result["video_name"]}')
+            except Exception as e:
+                print(f"Error processing video: {e}")
+
+    save_slice_info(slice_info, output_json_path)
 
 if __name__ == "__main__":
     json_file = "Youtube_videos/batch_01/selected_videos_by_optical_flow_0704_v1.json"
